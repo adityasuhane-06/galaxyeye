@@ -1,0 +1,46 @@
+seed: 42
+device: auto
+
+data:
+  train_dir: data/raw/train/train
+  val_dir: data/raw/val/val
+  test_dir: data/raw/test/test
+  image_size: 512
+  input_channels: 4
+  num_workers: 4
+  pin_memory: true
+
+training:
+  epochs: 30
+  batch_size: 4
+  learning_rate: 0.0003
+  weight_decay: 0.0001
+  optimizer: adamw
+  scheduler: cosine
+  amp: true
+  grad_clip_norm: 1.0
+  log_interval: 25
+  checkpoint_dir: outputs/checkpoints
+  resume: null
+
+loss:
+  name: bce_dice
+  bce_weight: 0.5
+  dice_weight: 0.5
+  pos_weight: 20.0
+  smooth: 1.0
+
+model:
+  name: unet
+  base_channels: 32
+  dropout: 0.1
+
+augmentation:
+  horizontal_flip: true
+  vertical_flip: true
+  random_rot90: true
+
+evaluation:
+  threshold: 0.5
+  save_visualizations: true
+  visualization_count: 8

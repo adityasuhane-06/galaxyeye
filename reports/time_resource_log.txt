@@ -1,0 +1,21 @@
+Total time spent:
+- Data exploration: TODO
+- Literature reading: TODO
+- Implementation: TODO
+- Training: TODO
+- Evaluation: TODO
+- Report writing: TODO
+
+Machine used for training:
+- Local/cloud: TODO
+- CPU: TODO
+- RAM: TODO
+- GPU model and VRAM: TODO
+- Number of GPUs: TODO
+
+Training time:
+- Approximate time per epoch: TODO
+- Total wall-clock training time: TODO
+
+Constraints:
+- TODO
