@@ -1,221 +1,227 @@
 # GalaxEye EO-SAR Binary Change Detection
 
-This repository implements a reproducible baseline for binary pixel-level change detection on the GalaxEye EO-SAR assignment dataset. The model takes a co-registered pre-event EO image and post-event SAR image, concatenates them into a 4-channel tensor, and predicts a binary change mask.
+## Project Title & Description
 
-The original four mask classes are remapped before training and evaluation:
+This repository contains an end-to-end solution for the GalaxEye AI Research Intern assignment on binary pixel-level change detection from paired Electro-Optical (EO) and Synthetic Aperture Radar (SAR) imagery.
 
-| Original value | Meaning | Binary value |
-| --- | --- | --- |
-| 0 | Background | 0, no-change |
-| 1 | Intact | 0, no-change |
-| 2 | Damaged | 1, change |
-| 3 | Destroyed | 1, change |
+The model receives a pre-event RGB EO image and a post-event single-channel SAR image, builds a 4-channel tensor, and predicts a binary change mask. The final approach uses a dual-encoder late-fusion U-Net with ImageNet-pretrained ResNet encoders, BCE-Dice loss, foreground-aware crop sampling, EO/SAR domain augmentation, and validation-threshold tuning.
+
+The assignment-mandated label remapping is applied before all training and evaluation:
+
+| Original value | Original class | Binary value | Binary class |
+| ---: | --- | ---: | --- |
+| 0 | Background | 0 | No-change |
+| 1 | Intact | 0 | No-change |
+| 2 | Damaged | 1 | Change |
+| 3 | Destroyed | 1 | Change |
 
 ## Requirements
 
 - Python 3.10 or newer
 - CUDA-capable GPU recommended
-- Dependencies are pinned in `requirements.txt`
+- Pinned dependencies are listed in [requirements.txt](requirements.txt)
+
+Main packages:
+
+| Package | Version |
+| --- | --- |
+| torch | 2.5.1 |
+| torchvision | 0.20.1 |
+| torchaudio | 2.5.1 |
+| numpy | 1.26.4 |
+| tifffile | 2024.5.22 |
+| PyYAML | 6.0.1 |
+| tqdm | 4.66.4 |
+| matplotlib | 3.9.0 |
+| scikit-learn | 1.5.0 |
 
 ## Environment Setup
 
-Using `venv`:
+Using `venv` on Linux/macOS:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install --upgrade pip
-pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu121
-pip install numpy==1.26.4 tifffile==2024.5.22 PyYAML==6.0.1 tqdm==4.66.4 matplotlib==3.9.0 scikit-learn==1.5.0
+python -m pip install --upgrade pip
+pip install -r requirements.txt
 ```
 
-Equivalent one-file CUDA install:
-
-```bash
-pip install -r requirements-cu121.txt
-```
-
-On Windows PowerShell:
+Using `venv` on Windows PowerShell:
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu121
-pip install numpy==1.26.4 tifffile==2024.5.22 PyYAML==6.0.1 tqdm==4.66.4 matplotlib==3.9.0 scikit-learn==1.5.0
+pip install -r requirements.txt
 ```
 
-Equivalent one-file CUDA install:
+For CUDA 12.1 wheels, use:
 
-```powershell
+```bash
 pip install -r requirements-cu121.txt
 ```
 
-Check GPU access:
+Verify CUDA:
 
-```powershell
-python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'No CUDA')"
+```bash
+python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'No CUDA')"
 ```
 
 ## Dataset Structure
 
-After downloading and extracting the dataset, this code expects:
+Place the provided dataset under `data/raw` with the fixed split layout below:
 
 ```text
-data/raw/train/train/
-  pre-event/
-  post-event/
-  target/
-
-data/raw/val/val/
-  pre-event/
-  post-event/
-  target/
-
-data/raw/test/test/
-  pre-event/
-  post-event/
-  target/
+data/raw/
+  train/
+    train/
+      pre-event/
+      post-event/
+      target/
+  val/
+    val/
+      pre-event/
+      post-event/
+      target/
+  test/
+    test/
+      pre-event/
+      post-event/
+      target/
 ```
 
-The scripts also accept direct split roots such as `/path/to/train` if that folder already contains `pre-event`, `post-event`, and `target`.
+Each sample is a TIFF triplet:
 
-To download from Windows PowerShell:
-
-```powershell
-.\scripts\download_data.ps1
+```text
+pre-event:  RGB EO image, 1024 x 1024 x 3
+post-event: SAR image,    1024 x 1024 x 1
+target:     mask,         1024 x 1024 x 1
 ```
 
-To download from bash/WSL:
+Optional download helpers:
 
 ```bash
 bash scripts/download_data.sh
 ```
 
-## Data Inspection
+```powershell
+.\scripts\download_data.ps1
+```
+
+Validate extracted TIFF files:
+
+```bash
+python validate_data.py --data_path data/raw/train/train
+python validate_data.py --data_path data/raw/val/val
+python validate_data.py --data_path data/raw/test/test
+```
+
+Inspect split statistics:
 
 ```bash
 python inspect_data.py --data_path data/raw/train/train --output outputs/metrics/train_data_report.json
 python inspect_data.py --data_path data/raw/val/val --output outputs/metrics/val_data_report.json
+python inspect_data.py --data_path data/raw/test/test --output outputs/metrics/test_data_report.json
 ```
 
-Observed on the downloaded train/validation splits:
+Observed class imbalance after correct binary remapping:
 
-| Split | Samples | Change pixels after remap |
+| Split | Samples | Change pixel fraction |
 | --- | ---: | ---: |
 | Train | 2781 | 1.57% |
 | Validation | 334 | 2.20% |
-
-This severe imbalance motivates the BCE + Dice loss and positive class weighting in `configs/baseline.yaml`.
+| Provided test | 77 | 0.75% |
 
 ## Training
 
-```bash
-python train.py --config configs/baseline.yaml
-```
-
-Fast smoke-training run for a quick checkpoint:
+Train from scratch with the final configuration:
 
 ```bash
-python train.py --config configs/fast.yaml
+python train.py --config config.yaml --device cuda
 ```
 
-Higher-accuracy run for final submission:
+The final configuration logs the random seed, image size, augmentations, model, optimizer, learning rate, batch size, epoch count, scheduler, loss settings, and checkpoint directory.
 
-```bash
-python train.py --config configs/high_accuracy.yaml
-```
-
-This uses the full train split and foreground-aware crop sampling, which is important because change pixels are rare.
-
-For an RTX 3050 4GB, start with:
-
-```bash
-python train.py --config configs/high_accuracy.yaml --epochs 20 --batch_size 2 --device cuda
-```
-
-If that is too slow, use the RTX 3050 balanced config:
-
-```bash
-python train.py --config configs/rtx3050_balanced.yaml --device cuda
-```
-
-If CUDA runs out of memory, lower the batch size:
-
-```bash
-python train.py --config configs/high_accuracy.yaml --epochs 20 --batch_size 1 --device cuda
-```
-
-Useful overrides:
-
-```bash
-python train.py --config configs/baseline.yaml --epochs 10 --batch_size 2
-python train.py --config configs/baseline.yaml --train_dir /path/to/train --val_dir /path/to/val
-```
-
-Checkpoints are written to:
+Checkpoints are saved to:
 
 ```text
-outputs/checkpoints/best.pth
-outputs/checkpoints/last.pth
+outputs/checkpoints_final_conservative/
+  best.pth
+  last.pth
+  used_config.yaml
+  history.json
+  train_distribution.json
+  val_distribution.json
 ```
 
 ## Evaluation
 
-Validation:
+Run validation threshold sweep:
 
 ```bash
 python eval.py \
-  --config configs/baseline.yaml \
+  --config config.yaml \
   --data_path data/raw/val/val \
-  --weights outputs/checkpoints/best.pth \
-  --output outputs/metrics/val_metrics.json \
-  --visualize
+  --weights outputs/checkpoints_final_conservative/best.pth \
+  --output outputs/metrics/val_sweep.json \
+  --sweep_thresholds \
+  --device cuda
 ```
 
-Provided test split:
+Run test evaluation using the retained reporting threshold:
 
 ```bash
 python eval.py \
-  --config configs/baseline.yaml \
+  --config config.yaml \
   --data_path data/raw/test/test \
-  --weights outputs/checkpoints/best.pth \
+  --weights outputs/checkpoints_final_conservative/best.pth \
   --output outputs/metrics/test_metrics.json \
-  --visualize \
-  --vis_dir outputs/visualizations/test
+  --threshold 0.90 \
+  --device cuda
 ```
 
-The evaluator reports IoU, precision, recall, F1, accuracy, and the binary confusion matrix for the change class.
+Optional full-image tiled evaluation:
+
+```bash
+python eval.py \
+  --config config.yaml \
+  --data_path data/raw/test/test \
+  --weights outputs/checkpoints_final_conservative/best.pth \
+  --output outputs/metrics/test_full_metrics.json \
+  --threshold 0.80 \
+  --full_image \
+  --tile_size 384 \
+  --tile_stride 256 \
+  --device cuda
+```
+
+The evaluator reports IoU, precision, recall, F1, accuracy, TP/FP/TN/FN, and confusion matrix for the change class.
 
 ## Model Weights
 
-Final checkpoint link: `TODO: add public Google Drive or Hugging Face link after training`
+Final checkpoint download link:
+
+[Download `best.pth` from Google Drive](https://drive.google.com/file/d/1A7vLlMNN-TF8t2u_WcTPXZldXE5HsKe8/view?usp=sharing)
 
 ## Results
 
-Fill this table after training and evaluation:
+Final retained metrics:
 
-| Split | IoU | Precision | Recall | F1 | Confusion Matrix `[[TN, FP], [FN, TP]]` |
-| --- | ---: | ---: | ---: | ---: | --- |
-| Validation | TODO | TODO | TODO | TODO | TODO |
-| Test | TODO | TODO | TODO | TODO | TODO |
+| Split | Threshold | IoU | Precision | Recall | F1 | Confusion Matrix `[[TN, FP], [FN, TP]]` |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Validation | 0.80 | 0.4385 | 0.6210 | 0.5987 | 0.6097 | `[[47209631, 546090], [599707, 894876]]` |
+| Provided test | 0.90 | 0.0573 | 0.2911 | 0.0666 | 0.1085 | `[[11252969, 14125], [81219, 5799]]` |
 
-## Method Summary
+## Citation / References
 
-- Input: 4 channels, consisting of 3-channel pre-event EO and 1-channel post-event SAR.
-- Model: compact U-Net baseline with skip connections.
-- Loss: weighted BCE + Dice loss.
-- Augmentation: random crop, flips, and 90-degree rotations.
-- Metrics: change-class IoU, precision, recall, F1, and confusion matrix.
-
-## References
-
-- Ronneberger et al., "U-Net: Convolutional Networks for Biomedical Image Segmentation", 2015.
-- Daudt et al., "Fully Convolutional Siamese Networks for Change Detection", 2018.
-- Chen and Shi, "A Spatial-Temporal Attention-Based Method and a New Dataset for Remote Sensing Image Change Detection", 2020.
-- Chen et al., "Remote Sensing Image Change Detection with Transformers", 2021.
-- Bandara and Patel, "A Transformer-Based Siamese Network for Change Detection", 2022.
-- Fang et al., "SNUNet-CD: A Densely Connected Siamese Network for Change Detection of VHR Images", 2021.
+- Ronneberger, O., Fischer, P., and Brox, T. "U-Net: Convolutional Networks for Biomedical Image Segmentation." MICCAI, 2015.
+- He, K., Zhang, X., Ren, S., and Sun, J. "Deep Residual Learning for Image Recognition." CVPR, 2016.
+- Daudt, R. C., Le Saux, B., and Boulch, A. "Fully Convolutional Siamese Networks for Change Detection." ICIP, 2018.
+- Chen, H. and Shi, Z. "A Spatial-Temporal Attention-Based Method and a New Dataset for Remote Sensing Image Change Detection." Remote Sensing, 2020.
+- Chen, H., Qi, Z., and Shi, Z. "Remote Sensing Image Change Detection with Transformers." IEEE TGRS, 2022.
+- Bandara, W. G. C. and Patel, V. M. "A Transformer-Based Siamese Network for Change Detection." IGARSS, 2022.
+- Fang, S. et al. "SNUNet-CD: A Densely Connected Siamese Network for Change Detection of VHR Images." IEEE GRSL, 2022.
+- PyTorch and torchvision documentation/codebase for pretrained ResNet backbones.
 
 ## Submission Packaging
 

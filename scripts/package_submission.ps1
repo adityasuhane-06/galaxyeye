@@ -8,7 +8,7 @@ $staging = "outputs\submission"
 
 New-Item -ItemType Directory -Force -Path $staging | Out-Null
 
-Copy-Item -Force outputs\checkpoints\best.pth "$staging\best.pth"
+Copy-Item -Force outputs\checkpoints_final_conservative\best.pth "$staging\best.pth"
 Copy-Item -Force reports\technical_report.pdf "$staging\technical_report.pdf"
 Copy-Item -Force reports\time_resource_log.txt "$staging\time_resource_log.txt"
 
